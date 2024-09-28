@@ -148,6 +148,12 @@ export class Painter {
                 this.style._layers[layerId].resize();
             }
         }
+        if(this._useMultipleOutputs) {
+            this.offscreenBuffer.destroy();
+            this.offscreenBuffer = null;
+
+            this.initMultipleRenderTargets();
+        }
     }
 
     setup() {
