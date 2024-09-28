@@ -422,8 +422,6 @@ export class Painter {
         if (this._useMultipleOutputs) {
             this.context.bindFramebuffer.set(this.offscreenBuffer.framebuffer);
             this.context.clear({ color: Color.black, depth: 1 });
-
-            this.context.setDrawBuffers({ color0: true, color1: true });
         }
 
         // draw sky first to not overwrite symbols
@@ -685,6 +683,8 @@ export class Painter {
             const offScreenTexture = new Texture(context, { width, height, data: null }, context.gl.RGBA, { premultiply: false, useMipmap: false });
             this.offscreenBuffer.colorAttachment1.set(offScreenTexture.texture, true);
             this.offscreenBuffer.depthAttachment.set(context.createRenderbuffer(context.gl.DEPTH_STENCIL, width, height));
+
+            this.context.setDrawBuffers({ color0: true, color1: true });
         }
     }
 
