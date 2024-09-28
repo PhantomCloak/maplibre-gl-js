@@ -494,13 +494,19 @@ export class ColorAttachment extends FramebufferAttachment<WebGLTexture> {
     setDirty() {
         this.dirty = true;
     }
-    set(v?: WebGLTexture | null): void {
+    set(v?: WebGLTexture | null, second?: boolean): void {
         if (v === this.current && !this.dirty) return;
         this.context.bindFramebuffer.set(this.parent);
         // note: it's possible to attach a renderbuffer to the color
         // attachment point, but thus far MBGL only uses textures for color
         const gl = this.gl;
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, v, 0);
+        if (!second) {
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, v, 0);
+        }
+        else {
+            if (!(gl instanceof WebGL2RenderingContext)) return;
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, v, 0);
+        }
 
         this.current = v;
         this.dirty = false;

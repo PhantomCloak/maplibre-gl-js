@@ -52,7 +52,8 @@ export class Program<Us extends UniformBindings> {
         configuration: ProgramConfiguration,
         fixedUniforms: (b: Context, a: UniformLocations) => Us,
         showOverdrawInspector: boolean,
-        terrain: Terrain) {
+        terrain: Terrain,
+        hasMultipleOutputs?: boolean) {
 
         const gl = context.gl;
         this.program = gl.createProgram();
@@ -72,6 +73,12 @@ export class Program<Us extends UniformBindings> {
         }
 
         const defines = configuration ? configuration.defines() : [];
+        let preludeFragmentSource = shaders.prelude.fragmentSource as string;
+        const preludeVertexSource = shaders.prelude.vertexSource as string;
+
+        let fragmentSource = source.fragmentSource;
+        let vertexSource = source.vertexSource;
+
         if (showOverdrawInspector) {
             defines.push('#define OVERDRAW_INSPECTOR;');
         }
@@ -79,8 +86,23 @@ export class Program<Us extends UniformBindings> {
             defines.push('#define TERRAIN3D;');
         }
 
-        const fragmentSource = defines.concat(shaders.prelude.fragmentSource, source.fragmentSource).join('\n');
-        const vertexSource = defines.concat(shaders.prelude.vertexSource, source.vertexSource).join('\n');
+        if (hasMultipleOutputs) {
+            preludeFragmentSource = `${preludeFragmentSource}\nlayout(location = 1) out highp vec4 fragColor1;`;
+
+            const fragColorAssignmentPattern = /fragColor\s*=\s*[\s\S]*?;/;
+            const match = fragColorAssignmentPattern.exec(fragmentSource);
+            const insertPosition = match.index + match[0].length;
+            const insertString = '\nfragColor1 = fragColor.bgra;';
+            fragmentSource = fragmentSource.slice(0, insertPosition) + insertString + fragmentSource.slice(insertPosition);
+        }
+
+        const injectDefines = (source: string) => {
+            const [versionLine, ...restLines] = source.split('\n');
+            return [versionLine, ...defines, ...restLines].join('\n');
+        };
+
+        fragmentSource = injectDefines(`${preludeFragmentSource}\n${fragmentSource}`);
+        vertexSource = injectDefines(`${preludeVertexSource}\n${vertexSource }`);
 
         const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
         if (gl.isContextLost()) {

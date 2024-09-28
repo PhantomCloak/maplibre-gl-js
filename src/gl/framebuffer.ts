@@ -12,9 +12,10 @@ export class Framebuffer {
     height: number;
     framebuffer: WebGLFramebuffer;
     colorAttachment: ColorAttachment;
+    colorAttachment1?: ColorAttachment;
     depthAttachment: DepthAttachment;
 
-    constructor(context: Context, width: number, height: number, hasDepth: boolean, hasStencil: boolean) {
+    constructor(context: Context, width: number, height: number, hasDepth: boolean, hasStencil: boolean, hasMultipRenderTarget?: boolean) {
         this.context = context;
         this.width = width;
         this.height = height;
@@ -22,6 +23,9 @@ export class Framebuffer {
         const fbo = this.framebuffer = gl.createFramebuffer();
 
         this.colorAttachment = new ColorAttachment(context, fbo);
+        if (hasMultipRenderTarget) {
+            this.colorAttachment1 = new ColorAttachment(context, fbo);
+        }
         if (hasDepth) {
             this.depthAttachment = hasStencil ? new DepthStencilAttachment(context, fbo) : new DepthAttachment(context, fbo);
         } else if (hasStencil) {
@@ -38,6 +42,10 @@ export class Framebuffer {
         const texture = this.colorAttachment.get();
         if (texture) gl.deleteTexture(texture);
 
+        if (this.colorAttachment1) {
+            const texture = this.colorAttachment1.get();
+            if (texture) gl.deleteTexture(texture);
+        }
         if (this.depthAttachment) {
             const renderbuffer = this.depthAttachment.get();
             if (renderbuffer) gl.deleteRenderbuffer(renderbuffer);

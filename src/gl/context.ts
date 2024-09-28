@@ -301,6 +301,40 @@ export class Context {
         this.colorMask.set(colorMode.mask);
     }
 
+    setDrawBuffers({ color0, color1 }) {
+        if (!(this.gl instanceof WebGL2RenderingContext)) return;
+
+        if (color0 && color1) {
+            this.gl.drawBuffers([
+                this.gl.COLOR_ATTACHMENT0,
+                this.gl.COLOR_ATTACHMENT1
+            ]);
+        }
+        else {
+            this.gl.drawBuffers([this.gl.COLOR_ATTACHMENT0]);
+        }
+    }
+
+    blitFrameBuffer(src: WebGLFramebuffer, srcWidth: number, srcHeight: number, includeColor: boolean, includeDepth: boolean, dst?: WebGLFramebuffer, dstWidth?: number, dstHeight?: number) {
+        if (!(this.gl instanceof WebGL2RenderingContext)) return;
+
+        let mask = 0;
+        if (includeColor) mask |= this.gl.COLOR_BUFFER_BIT;
+        if (includeDepth) mask |= this.gl.DEPTH_BUFFER_BIT;
+
+        this.gl.bindFramebuffer(this.gl.READ_FRAMEBUFFER, src);
+        this.gl.bindFramebuffer(this.gl.DRAW_FRAMEBUFFER, dst ? dst : null);
+
+        this.gl.blitFramebuffer(
+            0, 0, srcWidth, srcHeight,
+            0, 0, dst ? dstWidth : srcWidth, dst ? dstHeight : srcHeight,
+            mask,
+            this.gl.NEAREST);
+
+        this.gl.bindFramebuffer(this.gl.READ_FRAMEBUFFER, null);
+        this.gl.bindFramebuffer(this.gl.DRAW_FRAMEBUFFER, null);
+    }
+
     createVertexArray(): WebGLVertexArrayObject | undefined {
         if (isWebGL2(this.gl))
             return this.gl.createVertexArray();

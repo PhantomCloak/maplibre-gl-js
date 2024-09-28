@@ -119,6 +119,8 @@ export type MapOptions = {
      * @defaultValue false
      */
     preserveDrawingBuffer?: boolean;
+
+    useMultipleOutputs?: boolean;
     /**
      * If `true`, the gl context will be created with MSAA antialiasing, which can be useful for antialiasing custom layers.
      * Disabled by default as a performance optimization.
@@ -451,6 +453,7 @@ export class Map extends Camera {
     _showCollisionBoxes: boolean;
     _showPadding: boolean;
     _showOverdrawInspector: boolean;
+    _useMultipleOutputs: boolean;
     _repaint: boolean;
     _vertices: boolean;
     _canvas: HTMLCanvasElement;
@@ -588,6 +591,7 @@ export class Map extends Camera {
         this._maxTileCacheZoomLevels = resolvedOptions.maxTileCacheZoomLevels;
         this._failIfMajorPerformanceCaveat = resolvedOptions.failIfMajorPerformanceCaveat === true;
         this._preserveDrawingBuffer = resolvedOptions.preserveDrawingBuffer === true;
+        this._useMultipleOutputs = resolvedOptions.useMultipleOutputs === true;
         this._antialias = resolvedOptions.antialias === true;
         this._trackResize = resolvedOptions.trackResize === true;
         this._bearingSnap = resolvedOptions.bearingSnap;
@@ -3006,6 +3010,9 @@ export class Map extends Camera {
         }
 
         this.painter = new Painter(gl, this.transform);
+        if (this._useMultipleOutputs) {
+            this.painter.initMultipleRenderTargets();
+        }
 
         webpSupported.testSupport(gl);
     }
@@ -3157,6 +3164,7 @@ export class Map extends Camera {
         this.painter.render(this.style, {
             showTileBoundaries: this.showTileBoundaries,
             showOverdrawInspector: this._showOverdrawInspector,
+            useMultipleOutputs: this._useMultipleOutputs,
             rotating: this.isRotating(),
             zooming: this.isZooming(),
             moving: this.isMoving(),

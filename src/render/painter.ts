@@ -48,12 +48,14 @@ import type {VertexBuffer} from '../gl/vertex_buffer';
 import type {IndexBuffer} from '../gl/index_buffer';
 import type {DepthRangeType, DepthMaskType, DepthFuncType} from '../gl/types';
 import type {ResolvedImage} from '@maplibre/maplibre-gl-style-spec';
+import { Framebuffer } from '../gl/framebuffer';
 
 export type RenderPass = 'offscreen' | 'opaque' | 'translucent';
 
 type PainterOptions = {
     showOverdrawInspector: boolean;
     showTileBoundaries: boolean;
+    useMultipleOutputs: boolean;
     showPadding: boolean;
     rotating: boolean;
     zooming: boolean;
@@ -103,11 +105,13 @@ export class Painter {
     nextStencilID: number;
     id: string;
     _showOverdrawInspector: boolean;
+    _useMultipleOutputs: boolean;
     cache: {[_: string]: Program<any>};
     crossTileSymbolIndex: CrossTileSymbolIndex;
     symbolFadeChange: number;
     debugOverlayTexture: Texture;
     debugOverlayCanvas: HTMLCanvasElement;
+    offscreenBuffer?: Framebuffer;
     // this object stores the current camera-matrix and the last render time
     // of the terrain-facilitators. e.g. depth & coords framebuffers
     // every time the camera-matrix changes the terrain-facilitators will be redrawn.
@@ -408,6 +412,14 @@ export class Painter {
         this.context.clear({color: options.showOverdrawInspector ? Color.black : Color.transparent, depth: 1});
         this.clearStencil();
 
+        this._useMultipleOutputs = options.useMultipleOutputs;
+        if (this._useMultipleOutputs) {
+            this.context.bindFramebuffer.set(this.offscreenBuffer.framebuffer);
+            this.context.clear({ color: Color.black, depth: 1 });
+
+            this.context.setDrawBuffers({ color0: true, color1: true });
+        }
+
         // draw sky first to not overwrite symbols
         if (this.style.sky) drawSky(this, this.style.sky);
 
@@ -446,6 +458,10 @@ export class Painter {
 
             this._renderTileClippingMasks(layer, coordsAscending[layer.source]);
             this.renderLayer(this, sourceCache, layer, coords);
+        }
+
+        if(this._useMultipleOutputs){
+            this.context.blitFrameBuffer(this.offscreenBuffer.framebuffer, this.width, this.height, true, true);
         }
 
         if (this.options.showTileBoundaries) {
@@ -603,7 +619,8 @@ export class Painter {
                 programConfiguration,
                 programUniforms[name],
                 this._showOverdrawInspector,
-                this.style.map.terrain
+                this.style.map.terrain,
+                this._useMultipleOutputs
             );
         }
         return this.cache[key];
@@ -645,6 +662,23 @@ export class Painter {
             this.debugOverlayCanvas.height = 512;
             const gl = this.context.gl;
             this.debugOverlayTexture = new Texture(this.context, this.debugOverlayCanvas, gl.RGBA);
+        }
+    }
+
+    initMultipleRenderTargets() {
+        if (this.offscreenBuffer == null) {
+            const context = this.context;
+            const width = this.context.gl.canvas.width;
+            const height = this.context.gl.canvas.height
+
+            this.offscreenBuffer = new Framebuffer(this.context, width, height, true, true, true);
+
+            const renderTexture = new Texture(context, { width, height, data: null }, context.gl.RGBA, { premultiply: false });
+            this.offscreenBuffer.colorAttachment.set(renderTexture.texture);
+
+            const offScreenTexture = new Texture(context, { width, height, data: null }, context.gl.RGBA, { premultiply: false, useMipmap: false });
+            this.offscreenBuffer.colorAttachment1.set(offScreenTexture.texture, true);
+            this.offscreenBuffer.depthAttachment.set(context.createRenderbuffer(context.gl.DEPTH_STENCIL, width, height));
         }
     }
 

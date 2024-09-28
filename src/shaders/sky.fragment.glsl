@@ -9,9 +9,9 @@ void main() {
     if (y > u_horizon) {
         float blend = y - u_horizon;
         if (blend < u_sky_horizon_blend) {
-            gl_FragColor = mix(u_sky_color, u_horizon_color, pow(1.0 - blend / u_sky_horizon_blend, 2.0));
+            fragColor = mix(u_sky_color, u_horizon_color, pow(1.0 - blend / u_sky_horizon_blend, 2.0));
         } else {
-            gl_FragColor = u_sky_color;
+            fragColor = u_sky_color;
         }
     }
 }
