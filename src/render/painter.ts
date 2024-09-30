@@ -55,7 +55,7 @@ export type RenderPass = 'offscreen' | 'opaque' | 'translucent';
 type PainterOptions = {
     showOverdrawInspector: boolean;
     showTileBoundaries: boolean;
-    useMultipleOutputs: boolean;
+    useMultipleOutputs?: boolean;
     showPadding: boolean;
     rotating: boolean;
     zooming: boolean;
@@ -105,7 +105,7 @@ export class Painter {
     nextStencilID: number;
     id: string;
     _showOverdrawInspector: boolean;
-    _useMultipleOutputs: boolean;
+    _useMultipleOutputs?: boolean;
     cache: {[_: string]: Program<any>};
     crossTileSymbolIndex: CrossTileSymbolIndex;
     symbolFadeChange: number;
