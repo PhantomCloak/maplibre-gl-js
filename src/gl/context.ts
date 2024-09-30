@@ -37,6 +37,7 @@ export class Context {
     clearDepth: ClearDepth;
     clearStencil: ClearStencil;
     colorMask: ColorMask;
+    colorMaskOffscreen?: ColorMask;
     depthMask: DepthMask;
     stencilMask: StencilMask;
     stencilFunc: StencilFunc;
@@ -78,6 +79,7 @@ export class Context {
         this.clearDepth = new ClearDepth(this);
         this.clearStencil = new ClearStencil(this);
         this.colorMask = new ColorMask(this);
+        this.colorMaskOffscreen = new ColorMask(this);
         this.depthMask = new DepthMask(this);
         this.stencilMask = new StencilMask(this);
         this.stencilFunc = new StencilFunc(this);

@@ -92,7 +92,7 @@ export class Program<Us extends UniformBindings> {
             const fragColorAssignmentPattern = /fragColor\s*=\s*[\s\S]*?;/;
             const match = fragColorAssignmentPattern.exec(fragmentSource);
             const insertPosition = match.index + match[0].length;
-            const insertString = '\nfragColor1 = fragColor.bgra;';
+            const insertString = '\nfragColor1 = vec4(1.0);';
             fragmentSource = fragmentSource.slice(0, insertPosition) + insertString + fragmentSource.slice(insertPosition);
         }
 
