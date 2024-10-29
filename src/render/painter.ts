@@ -467,7 +467,7 @@ export class Painter {
             if (this.renderToTexture && this.renderToTexture.renderLayer(layer)) continue;
 
             // Postprocessing layer always have to be top most layer
-            if (layer.type === 'custom' && layer.isPpfx) {
+            if (layer.type === 'custom' && layer.isPpfx()) {
                 this.postprocessLayer = layer;
                 continue;
             }
