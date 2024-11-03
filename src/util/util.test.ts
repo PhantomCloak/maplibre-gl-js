@@ -1,5 +1,5 @@
 import Point from '@mapbox/point-geometry';
-import {arraysIntersect, bezier, clamp, clone, deepEqual, easeCubicInOut, extend, filterObject, findLineIntersection, isCounterClockwise, isPowerOfTwo, keysDifference, mapObject, nextPowerOfTwo, parseCacheControl, pick, readImageDataUsingOffscreenCanvas, readImageUsingVideoFrame, uniqueId, wrap} from './util';
+import {arraysIntersect, bezier, clamp, clone, deepEqual, easeCubicInOut, extend, filterObject, findLineIntersection, isCounterClockwise, isPowerOfTwo, keysDifference, mapObject, nextPowerOfTwo, parseCacheControl, pick, readImageDataUsingOffscreenCanvas, readImageUsingVideoFrame, uniqueId, wrap, mod, distanceOfAnglesRadians, distanceOfAnglesDegrees, differenceOfAnglesRadians, differenceOfAnglesDegrees, solveQuadratic, remapSaturate, radiansToDegrees, degreesToRadians, rollPitchBearingToQuat, getRollPitchBearing} from './util';
 import {Canvas} from 'canvas';
 
 describe('util', () => {
@@ -111,6 +111,67 @@ describe('util', () => {
         expect(deepEqual(a, null)).toBeFalsy();
         expect(deepEqual(null, c)).toBeFalsy();
         expect(deepEqual(null, null)).toBeTruthy();
+    });
+
+    test('mod', () => {
+        expect(mod(2, 3)).toBe(2);
+        expect(mod(4, 3)).toBe(1);
+        expect(mod(-1, 3)).toBe(2);
+        expect(mod(-1, 3)).toBe(2);
+    });
+
+    test('degreesToRadians', () => {
+        expect(degreesToRadians(1.0)).toBe(Math.PI / 180.0);
+    });
+
+    test('radiansToDegrees', () => {
+        expect(radiansToDegrees(1.0)).toBe(180.0 / Math.PI);
+    });
+
+    test('distanceOfAnglesRadians', () => {
+        const digits = 10;
+        expect(distanceOfAnglesRadians(0, 1)).toBeCloseTo(1, digits);
+        expect(distanceOfAnglesRadians(0.1, 2 * Math.PI - 0.1)).toBeCloseTo(0.2, digits);
+        expect(distanceOfAnglesRadians(0.5, -0.5)).toBeCloseTo(1, digits);
+        expect(distanceOfAnglesRadians(-0.5, 0.5)).toBeCloseTo(1, digits);
+    });
+
+    test('distanceOfAnglesDegrees', () => {
+        const digits = 10;
+        expect(distanceOfAnglesDegrees(0, 1)).toBeCloseTo(1, digits);
+        expect(distanceOfAnglesDegrees(10, 350)).toBeCloseTo(20, digits);
+        expect(distanceOfAnglesDegrees(0.5, -0.5)).toBeCloseTo(1, digits);
+        expect(distanceOfAnglesDegrees(-0.5, 0.5)).toBeCloseTo(1, digits);
+    });
+
+    test('differenceOfAnglesRadians', () => {
+        const digits = 10;
+        expect(differenceOfAnglesRadians(0, 1)).toBeCloseTo(1, digits);
+        expect(differenceOfAnglesRadians(0, -1)).toBeCloseTo(-1, digits);
+        expect(differenceOfAnglesRadians(0.1, 2 * Math.PI - 0.1)).toBeCloseTo(-0.2, digits);
+    });
+
+    test('differenceOfAnglesDegrees', () => {
+        const digits = 10;
+        expect(differenceOfAnglesDegrees(0, 1)).toBeCloseTo(1, digits);
+        expect(differenceOfAnglesDegrees(0, -1)).toBeCloseTo(-1, digits);
+        expect(differenceOfAnglesDegrees(10, 350)).toBeCloseTo(-20, digits);
+    });
+
+    test('solveQuadratic', () => {
+        expect(solveQuadratic(0, 0, 0)).toBeNull();
+        expect(solveQuadratic(1, 0, 1)).toBeNull();
+        expect(solveQuadratic(1, 0, -1)).toEqual({t0: 1, t1: 1});
+        expect(solveQuadratic(1, -8, 12)).toEqual({t0: 2, t1: 6});
+    });
+
+    test('remapSaturate', () => {
+        expect(remapSaturate(0, 0, 1, 2, 3)).toBe(2);
+        expect(remapSaturate(1, 0, 2, 2, 3)).toBe(2.5);
+        expect(remapSaturate(999, 0, 2, 2, 3)).toBe(3);
+        expect(remapSaturate(1, 1, 0, 2, 3)).toBe(2);
+        expect(remapSaturate(1, 0, 1, 3, 2)).toBe(2);
+        expect(remapSaturate(1, 1, 0, 3, 2)).toBe(3);
     });
 });
 
@@ -410,5 +471,32 @@ describe('util readImageDataUsingOffscreenCanvas', () => {
             10, 0, 0, 255, 0, 20, 0, 255,
             0, 0, 30, 255, 40, 40, 40, 255,
         ]);
+    });
+});
+
+describe('util rotations', () => {
+    test('rollPitchBearingToQuat', () => {
+        const roll = 10;
+        const pitch = 20;
+        const bearing = 30;
+
+        const rotation = rollPitchBearingToQuat(roll, pitch, bearing);
+        const angles = getRollPitchBearing(rotation);
+
+        expect(angles.roll).toBeCloseTo(roll, 6);
+        expect(angles.pitch).toBeCloseTo(pitch, 6);
+        expect(angles.bearing).toBeCloseTo(bearing, 6);
+    });
+
+    test('rollPitchBearingToQuat sinuglarity', () => {
+        const roll = 10;
+        const pitch = 0;
+        const bearing = 30;
+
+        const rotation = rollPitchBearingToQuat(roll, pitch, bearing);
+        const angles = getRollPitchBearing(rotation);
+
+        expect(angles.pitch).toBeCloseTo(0, 5);
+        expect(wrap(angles.bearing + angles.roll, -180, 180)).toBeCloseTo(wrap(bearing + roll, -180, 180), 6);
     });
 });

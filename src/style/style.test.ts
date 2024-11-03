@@ -1,10 +1,8 @@
 import {Style} from './style';
 import {SourceCache} from '../source/source_cache';
 import {StyleLayer} from './style_layer';
-import {Transform} from '../geo/transform';
 import {extend} from '../util/util';
-import {RequestManager} from '../util/request_manager';
-import {Event, Evented} from '../util/evented';
+import {Event} from '../util/evented';
 import {RGBAImage} from '../util/image';
 import {rtlMainThreadPluginFactory} from '../source/rtl_text_plugin_main_thread';
 import {browser} from '../util/browser';
@@ -12,11 +10,13 @@ import {OverscaledTileID} from '../source/tile_id';
 import {fakeServer, type FakeServer} from 'nise';
 
 import {EvaluationParameters} from './evaluation_parameters';
-import {LayerSpecification, GeoJSONSourceSpecification, FilterSpecification, SourceSpecification, StyleSpecification, SymbolLayerSpecification, TerrainSpecification, SkySpecification} from '@maplibre/maplibre-gl-style-spec';
+import {LayerSpecification, GeoJSONSourceSpecification, FilterSpecification, SourceSpecification, StyleSpecification, SymbolLayerSpecification, SkySpecification} from '@maplibre/maplibre-gl-style-spec';
 import {GeoJSONSource} from '../source/geojson_source';
-import {sleep} from '../util/test/util';
+import {StubMap, sleep} from '../util/test/util';
 import {RTLPluginLoadedEventName} from '../source/rtl_text_plugin_status';
 import {MessageType} from '../util/actor_messages';
+import {MercatorTransform} from '../geo/projection/mercator_transform';
+import {Tile} from '../source/tile';
 
 function createStyleJSON(properties?): StyleSpecification {
     return extend({
@@ -36,7 +36,7 @@ function createSource() {
     } as any as SourceSpecification;
 }
 
-function createGeoJSONSource() {
+function createGeoJSONSource(): GeoJSONSourceSpecification {
     return {
         'type': 'geojson',
         'data': {
@@ -44,30 +44,6 @@ function createGeoJSONSource() {
             'features': []
         }
     };
-}
-
-class StubMap extends Evented {
-    style: Style;
-    transform: Transform;
-    private _requestManager: RequestManager;
-    _terrain: TerrainSpecification;
-
-    constructor() {
-        super();
-        this.transform = new Transform();
-        this._requestManager = new RequestManager();
-    }
-
-    _getMapId() {
-        return 1;
-    }
-
-    getPixelRatio() {
-        return 1;
-    }
-
-    setTerrain(terrain) { this._terrain = terrain; }
-    getTerrain() { return this._terrain; }
 }
 
 const getStubMap = () => new StubMap() as any;
@@ -364,11 +340,9 @@ describe('Style#loadJSON', () => {
 
         await style.once('style.load');
 
-        expect(transformSpy).toHaveBeenCalledTimes(2);
-        expect(transformSpy.mock.calls[0][0]).toBe('http://example.com/sprites/bright-v8.json');
-        expect(transformSpy.mock.calls[0][1]).toBe('SpriteJSON');
-        expect(transformSpy.mock.calls[1][0]).toBe('http://example.com/sprites/bright-v8.png');
-        expect(transformSpy.mock.calls[1][1]).toBe('SpriteImage');
+        expect(transformSpy).toHaveBeenCalledTimes(1);
+        expect(transformSpy.mock.calls[0][0]).toBe('http://example.com/sprites/bright-v8');
+        expect(transformSpy.mock.calls[0][1]).toBe('Sprite');
     });
 
     test('emits an error on non-existant vector source layer', () => new Promise<void>(done => {
@@ -583,6 +557,20 @@ describe('Style#_load', () => {
         style._load(styleSpec, {validate: false});
         expect(style._serializedLayers).toBeNull();
     });
+
+    test('projection is mercator if not specified', () => {
+        const style = new Style(getStubMap());
+        const styleSpec = createStyleJSON({
+            layers: [{
+                id: 'background',
+                type: 'background'
+            }]
+        });
+
+        style._load(styleSpec, {validate: false});
+        expect(style.projection.name).toBe('mercator');
+        expect(style.serialize().projection).toBeUndefined();
+    });
 });
 
 describe('Style#_remove', () => {
@@ -675,6 +663,7 @@ describe('Style#setState', () => {
         spys.push(jest.spyOn(style, 'setGeoJSONSourceData').mockImplementation((() => {}) as any));
         spys.push(jest.spyOn(style, 'setLayerZoomRange').mockImplementation((() => {}) as any));
         spys.push(jest.spyOn(style, 'setLight').mockImplementation((() => {}) as any));
+        spys.push(jest.spyOn(style, 'setSky').mockImplementation((() => {}) as any));
         await style.once('style.load');
         const didChange = style.setState(createStyleJSON());
         expect(didChange).toBeFalsy();
@@ -703,6 +692,9 @@ describe('Style#setState', () => {
             },
             light: {
                 anchor: 'viewport'
+            },
+            sky: {
+                'atmosphere-blend': 0
             }
         });
         style.loadJSON(styleJson);
@@ -721,8 +713,9 @@ describe('Style#setState', () => {
         spys.push(jest.spyOn(style, 'setGeoJSONSourceData').mockImplementation((() => {}) as any));
         spys.push(jest.spyOn(style, 'setGlyphs').mockImplementation((() => {}) as any));
         spys.push(jest.spyOn(style, 'setSprite').mockImplementation((() => {}) as any));
-        spys.push(jest.spyOn(style, 'setSky').mockImplementation((() => {}) as any));
+        spys.push(jest.spyOn(style, 'setProjection').mockImplementation((() => {}) as any));
         spys.push(jest.spyOn(style.map, 'setTerrain').mockImplementation((() => {}) as any));
+        spys.push(jest.spyOn(style, 'setSky').mockImplementation((() => {}) as any));
 
         const newStyle = JSON.parse(JSON.stringify(styleJson)) as StyleSpecification;
         newStyle.layers[0].paint = {'text-color': '#7F7F7F',};
@@ -750,10 +743,13 @@ describe('Style#setState', () => {
             exaggeration: 0.5
         };
         newStyle.zoom = 2;
+        newStyle.projection = {type: 'globe'};
+
         newStyle.sky = {
             'fog-color': '#000001',
             'sky-color': '#000002',
             'horizon-fog-blend': 0.5,
+            'atmosphere-blend': 1
         };
         const didChange = style.setState(newStyle);
         expect(didChange).toBeTruthy();
@@ -782,6 +778,7 @@ describe('Style#setState', () => {
         spys.push(jest.spyOn(style, 'setGlyphs').mockImplementation((() => {}) as any));
         spys.push(jest.spyOn(style, 'setSprite').mockImplementation((() => {}) as any));
         spys.push(jest.spyOn(style.map, 'setTerrain').mockImplementation((() => {}) as any));
+        spys.push(jest.spyOn(style, 'setSky').mockImplementation((() => {}) as any));
 
         const newStyleJson = createStyleJSON();
         newStyleJson.transition = {duration: 5};
@@ -1723,7 +1720,7 @@ describe('Style#setPaintProperty', () => {
             ]
         }));
 
-        const tr = new Transform();
+        const tr = new MercatorTransform();
         tr.resize(512, 512);
 
         style.once('style.load', () => {
@@ -1964,7 +1961,7 @@ describe('Style#setFilter', () => {
         style.loadJSON({
             version: 8,
             sources: {
-                geojson: createGeoJSONSource() as GeoJSONSourceSpecification
+                geojson: createGeoJSONSource()
             },
             layers: [
                 {id: 'symbol', type: 'symbol', source: 'geojson', filter: ['==', 'id', 0]}
@@ -2091,7 +2088,7 @@ describe('Style#setLayerZoomRange', () => {
         style.loadJSON({
             'version': 8,
             'sources': {
-                'geojson': createGeoJSONSource() as GeoJSONSourceSpecification
+                'geojson': createGeoJSONSource()
             },
             'layers': [{
                 'id': 'symbol',
@@ -2184,12 +2181,12 @@ describe('Style#getLayersOrder', () => {
 
 describe('Style#queryRenderedFeatures', () => {
 
-    let style;
-    let transform;
+    let style: Style;
+    let transform: MercatorTransform;
 
     beforeEach(() => new Promise<void>(callback => {
         style = new Style(getStubMap());
-        transform = new Transform();
+        transform = new MercatorTransform();
         transform.resize(512, 512);
         function queryMapLibreFeatures(layers, serializedLayers, getFeatureState, queryGeom, cameraQueryGeom, scale, params) {
             const features = {
@@ -2223,7 +2220,7 @@ describe('Style#queryRenderedFeatures', () => {
 
             if (params.layers) {
                 for (const l in features) {
-                    if (params.layers.indexOf(l) < 0) {
+                    if (!params.layers.has(l)) {
                         delete features[l];
                     }
                 }
@@ -2284,10 +2281,11 @@ describe('Style#queryRenderedFeatures', () => {
         style.on('style.load', () => {
             style.sourceCaches.mapLibre.tilesIn = () => {
                 return [{
-                    tile: {queryRenderedFeatures: queryMapLibreFeatures},
+                    tile: {queryRenderedFeatures: queryMapLibreFeatures} as unknown as Tile,
                     tileID: new OverscaledTileID(0, 0, 0, 0, 0),
                     queryGeometry: [],
-                    scale: 1
+                    scale: 1,
+                    cameraQueryGeometry: []
                 }];
             };
             style.sourceCaches.other.tilesIn = () => {
@@ -2318,14 +2316,20 @@ describe('Style#queryRenderedFeatures', () => {
         expect(results).toHaveLength(2);
     });
 
+    test('filters by `layers` option as a Set', () => {
+        const results = style.queryRenderedFeatures([{x: 0, y: 0}], {layers: new Set(['land'])}, transform);
+        expect(results).toHaveLength(2);
+    });
+
     test('checks type of `layers` option', () => {
         let errors = 0;
         jest.spyOn(style, 'fire').mockImplementation((event) => {
-            if (event['error'] && event['error'].message.includes('parameters.layers must be an Array.')) {
+            if (event['error'] && event['error'].message.includes('parameters.layers must be an Array')) {
                 errors++;
             }
+            return style;
         });
-        style.queryRenderedFeatures([{x: 0, y: 0}], {layers: 'string'}, transform);
+        style.queryRenderedFeatures([{x: 0, y: 0}], {layers: 'string' as any}, transform);
         expect(errors).toBe(1);
     });
 
@@ -2349,19 +2353,21 @@ describe('Style#queryRenderedFeatures', () => {
     });
 
     test('include multiple layers', () => {
-        const results = style.queryRenderedFeatures([{x: 0, y: 0}], {layers: ['land', 'landref']}, transform);
+        const results = style.queryRenderedFeatures([{x: 0, y: 0}], {layers: new Set(['land', 'landref'])}, transform);
         expect(results).toHaveLength(3);
     });
 
     test('does not query sources not implicated by `layers` parameter', () => {
-        style.sourceCaches.mapLibre.queryRenderedFeatures = () => { expect(true).toBe(false); };
+        style.sourceCaches.mapLibre.map.queryRenderedFeatures = jest.fn();
         style.queryRenderedFeatures([{x: 0, y: 0}], {layers: ['land--other']}, transform);
+        expect(style.sourceCaches.mapLibre.map.queryRenderedFeatures).not.toHaveBeenCalled();
     });
 
     test('fires an error if layer included in params does not exist on the style', () => {
         let errors = 0;
         jest.spyOn(style, 'fire').mockImplementation((event) => {
             if (event['error'] && event['error'].message.includes('does not exist in the map\'s style and cannot be queried for features.')) errors++;
+            return style;
         });
         const results = style.queryRenderedFeatures([{x: 0, y: 0}], {layers: ['merp']}, transform);
         expect(errors).toBe(1);
@@ -2417,12 +2423,12 @@ describe('Style#query*Features', () => {
     // These tests only cover filter validation. Most tests for these methods
     // live in the integration tests.
 
-    let style;
+    let style: Style;
     let onError;
     let transform;
 
     beforeEach(() => new Promise<void>(callback => {
-        transform = new Transform();
+        transform = new MercatorTransform();
         transform.resize(100, 100);
         style = new Style(getStubMap());
         style.loadJSON({
@@ -2446,12 +2452,12 @@ describe('Style#query*Features', () => {
     }));
 
     test('querySourceFeatures emits an error on incorrect filter', () => {
-        expect(style.querySourceFeatures([10, 100], {filter: 7}, transform)).toEqual([]);
+        expect(style.querySourceFeatures([10, 100] as any, {filter: 7} as any)).toEqual([]);
         expect(onError.mock.calls[0][0].error.message).toMatch(/querySourceFeatures\.filter/);
     });
 
     test('queryRenderedFeatures emits an error on incorrect filter', () => {
-        expect(style.queryRenderedFeatures([{x: 0, y: 0}], {filter: 7}, transform)).toEqual([]);
+        expect(style.queryRenderedFeatures([{x: 0, y: 0}], {filter: 7 as any}, transform)).toEqual([]);
         expect(onError.mock.calls[0][0].error.message).toMatch(/queryRenderedFeatures\.filter/);
     });
 
@@ -2461,8 +2467,9 @@ describe('Style#query*Features', () => {
             if (event['error']) {
                 errors++;
             }
+            return style;
         });
-        style.queryRenderedFeatures([{x: 0, y: 0}], {filter: 'invalidFilter', validate: false}, transform);
+        style.queryRenderedFeatures([{x: 0, y: 0}], {filter: 'invalidFilter' as any, validate: false}, transform);
         expect(errors).toBe(0);
     });
 
@@ -2470,8 +2477,9 @@ describe('Style#query*Features', () => {
         let errors = 0;
         jest.spyOn(style, 'fire').mockImplementation((event) => {
             if (event['error']) errors++;
+            return style;
         });
-        style.querySourceFeatures([{x: 0, y: 0}], {filter: 'invalidFilter', validate: false}, transform);
+        style.querySourceFeatures([{x: 0, y: 0}] as any, {filter: 'invalidFilter' as any, validate: false});
         expect(errors).toBe(0);
     });
 
@@ -2563,6 +2571,30 @@ describe('Style#serialize', () => {
         expect(style.serialize().terrain).toBeUndefined();
     });
 
+    test('include projection property when projection is defined in the style', async () => {
+        const style = new Style(getStubMap());
+        style.loadJSON(createStyleJSON({
+            projection: {
+                type: 'globe'
+            }
+        }));
+
+        await style.once('style.load');
+        expect(style.serialize().projection).toBeDefined();
+        expect(style.serialize().projection.type).toBe('globe');
+    });
+
+    test('include projection property when projection is set', async () => {
+        const style = new Style(getStubMap());
+        style.loadJSON(createStyleJSON());
+
+        await style.once('style.load');
+        style.setProjection({type: 'globe'});
+
+        expect(style.serialize().projection).toBeDefined();
+        expect(style.serialize().projection.type).toBe('globe');
+    });
+
     test('include sky property when map has sky', async () => {
         const sky: SkySpecification = {
             'horizon-fog-blend': 0.5,
@@ -2573,6 +2605,21 @@ describe('Style#serialize', () => {
         style.loadJSON(styleJson);
 
         await style.once('style.load');
+        expect(style.serialize().sky).toBe(sky);
+    });
+
+    test('include sky property when sky is set', async () => {
+        const sky = {
+            'atmosphere-blend': 0.5,
+        };
+        const style = new Style(getStubMap());
+        style.loadJSON(createStyleJSON());
+
+        await style.once('style.load');
+        style.setSky(sky);
+
+        expect(style.serialize().sky).toBeDefined();
+        expect(style.serialize().sky).toBe(sky);
         expect(style.serialize().sky).toStrictEqual(sky);
     });
 
