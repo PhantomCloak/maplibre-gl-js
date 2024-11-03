@@ -46,14 +46,14 @@ import type {VertexBuffer} from '../gl/vertex_buffer';
 import type {IndexBuffer} from '../gl/index_buffer';
 import type {DepthRangeType, DepthMaskType, DepthFuncType} from '../gl/types';
 import type {ResolvedImage} from '@maplibre/maplibre-gl-style-spec';
-import type {RenderToTexture} from './render_to_texture';
-import type {ProjectionData} from '../geo/projection/projection_data';
+import { Framebuffer } from '../gl/framebuffer';
 
 export type RenderPass = 'offscreen' | 'opaque' | 'translucent';
 
 type PainterOptions = {
     showOverdrawInspector: boolean;
     showTileBoundaries: boolean;
+    useMultipleOutputs?: boolean;
     showPadding: boolean;
     rotating: boolean;
     zooming: boolean;
@@ -107,11 +107,14 @@ export class Painter {
     nextStencilID: number;
     id: string;
     _showOverdrawInspector: boolean;
+    _useMultipleOutputs?: boolean;
     cache: {[_: string]: Program<any>};
     crossTileSymbolIndex: CrossTileSymbolIndex;
     symbolFadeChange: number;
     debugOverlayTexture: Texture;
     debugOverlayCanvas: HTMLCanvasElement;
+    offscreenBuffer?: Framebuffer;
+    postprocessLayer?: StyleLayer;
     // this object stores the current camera-matrix and the last render time
     // of the terrain-facilitators. e.g. depth & coords framebuffers
     // every time the camera-matrix changes the terrain-facilitators will be redrawn.
@@ -147,6 +150,12 @@ export class Painter {
             for (const layerId of this.style._order) {
                 this.style._layers[layerId].resize();
             }
+        }
+        if(this._useMultipleOutputs) {
+            this.offscreenBuffer.destroy();
+            this.offscreenBuffer = null;
+
+            this.initMultipleRenderTargets();
         }
     }
 
@@ -538,6 +547,15 @@ export class Painter {
         this._showOverdrawInspector = options.showOverdrawInspector;
         this.depthRangeFor3D = [0, 1 - ((style._order.length + 2) * this.numSublayers * this.depthEpsilon)];
 
+        if (!(this.context.gl instanceof WebGL2RenderingContext)) return;
+
+        this._useMultipleOutputs = options.useMultipleOutputs;
+        if (this._useMultipleOutputs) {
+            this.context.bindFramebuffer.set(this.offscreenBuffer.framebuffer);
+            this.context.setDrawBuffers({ color0: true, color1: true });
+            this.context.clear({ color: Color.transparent, depth: 1 });
+        }
+
         // Opaque pass ===============================================
         // Draw opaque layers top-to-bottom first.
         if (!this.renderToTexture) {
@@ -553,6 +571,13 @@ export class Painter {
             }
         }
 
+        // Since MapLibre's own colorMask overrides ours in opaque pass and doesn't provide OES_draw_buffers_indexed extension
+        // We have to reset here
+        if (this._useMultipleOutputs) {
+            this.context.gl.clearBufferfv(this.context.gl.COLOR, 1, [0.0, 0.0, 0.0, 0.0]);
+            this.context.colorMaskOffscreen.set([false, false, false, false], 1);
+        }
+
         // Translucent pass ===============================================
         // Draw all other layers bottom-to-top.
         this.renderPass = 'translucent';
@@ -565,22 +590,38 @@ export class Painter {
 
             if (this.renderToTexture && this.renderToTexture.renderLayer(layer)) continue;
 
-            if (!this.opaquePassEnabledForLayer() && !globeDepthRendered) {
-                globeDepthRendered = true;
-                // Render the globe sphere into the depth buffer - but only if globe is enabled and terrain is disabled.
-                // There should be no need for explicitly writing tile depths when terrain is enabled.
-                if (this.style.projection.name === 'globe' && !this.style.map.terrain) {
-                    this._renderTilesDepthBuffer();
-                }
+            // Postprocessing layer always have to be top most layer
+            if (layer.type === 'custom' && layer.isPpfx()) {
+                this.postprocessLayer = layer;
+                continue;
             }
 
             // For symbol layers in the translucent pass, we add extra tiles to the renderable set
             // for cross-tile symbol fading. Symbol layers don't use tile clipping, so no need to render
             // separate clipping masks
             const coords = (layer.type === 'symbol' ? coordsDescendingSymbol : coordsDescending)[layer.source];
+            const setColorMask = this._useMultipleOutputs && layer.defferedChannel;
+
+            if (setColorMask) {
+                this.context.colorMaskOffscreen.set([layer.defferedChannel.red, layer.defferedChannel.green, layer.defferedChannel.blue, layer.defferedChannel.alpha], 1);
+            }
 
             this._renderTileClippingMasks(layer, coordsAscending[layer.source], false);
             this.renderLayer(this, sourceCache, layer, coords);
+
+            if (setColorMask) {
+                this.context.colorMaskOffscreen.set([false, false, false, false], 1);
+            }
+        }
+
+        if (this._useMultipleOutputs) {
+            if (this.postprocessLayer) {
+                this.context.bindFramebuffer.set(null);
+                this.renderLayer(this, sourceCaches[this.postprocessLayer.source], this.postprocessLayer, coordsDescending[this.postprocessLayer.id]);
+            }
+            else {
+                this.context.blitFrameBuffer(this.offscreenBuffer.framebuffer, this.width, this.height, true, true);
+            }
         }
 
         // Render atmosphere, only for Globe projection
@@ -730,9 +771,8 @@ export class Painter {
                 programConfiguration,
                 programUniforms[name],
                 this._showOverdrawInspector,
-                useTerrain,
-                projectionPrelude,
-                projectionDefine
+                this.style.map.terrain,
+                this._useMultipleOutputs
             );
         }
         return this.cache[key];
@@ -774,6 +814,27 @@ export class Painter {
             this.debugOverlayCanvas.height = 512;
             const gl = this.context.gl;
             this.debugOverlayTexture = new Texture(this.context, this.debugOverlayCanvas, gl.RGBA);
+        }
+    }
+
+    initMultipleRenderTargets() {
+        if (this.offscreenBuffer == null) {
+            const context = this.context;
+            const width = this.context.gl.canvas.width;
+            const height = this.context.gl.canvas.height
+
+            this.offscreenBuffer = new Framebuffer(this.context, width, height, true, true, true);
+
+            const renderTexture = new Texture(context, { width, height, data: null }, context.gl.RGBA, { premultiply: false, useMipmap: true });
+            renderTexture.bind(context.gl.LINEAR, context.gl.CLAMP_TO_EDGE, context.gl.LINEAR);
+            this.offscreenBuffer.colorAttachment.set(renderTexture.texture);
+
+            const offScreenTexture = new Texture(context, { width, height, data: null }, context.gl.RGBA, { premultiply: false, useMipmap: true });
+            offScreenTexture.bind(context.gl.LINEAR, context.gl.CLAMP_TO_EDGE, context.gl.LINEAR);
+            this.offscreenBuffer.colorAttachment1.set(offScreenTexture.texture, true);
+            this.offscreenBuffer.depthAttachment.set(context.createRenderbuffer(context.gl.DEPTH_STENCIL, width, height));
+
+            this.context.setDrawBuffers({ color0: true, color1: true });
         }
     }
 

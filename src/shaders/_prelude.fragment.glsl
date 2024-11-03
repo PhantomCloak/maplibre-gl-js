@@ -1,3 +1,4 @@
+#version 300 es
 #ifdef GL_ES
 precision mediump float;
 #else
@@ -16,4 +17,4 @@ precision mediump float;
 
 #endif
 
-out highp vec4 fragColor;
+layout(location = 0) out highp vec4 fragColor;

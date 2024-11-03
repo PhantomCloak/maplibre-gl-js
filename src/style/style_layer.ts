@@ -39,6 +39,7 @@ export abstract class StyleLayer extends Evented {
     sourceLayer: string;
     minzoom: number;
     maxzoom: number;
+    defferedChannel?: { red, green, blue, alpha };
     filter: FilterSpecification | void;
     visibility: 'visible' | 'none' | void;
     _crossfadeParameters: CrossfadeParameters;
@@ -258,6 +259,10 @@ export abstract class StyleLayer extends Evented {
         return false;
     }
 
+    isPpfx() {
+        return false;
+    }
+
     isTileClipped() {
         return false;
     }
@@ -283,5 +288,9 @@ export abstract class StyleLayer extends Evented {
             }
         }
         return false;
+    }
+
+    setDefferedColor(channel: { red, green, blue, alpha }) {
+        this.defferedChannel = channel;
     }
 }

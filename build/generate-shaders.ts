@@ -37,23 +37,26 @@ function glslToTs(code: string, type: 'fragment'|'vertex'): string {
         .trim(); // strip whitespace at the start/end
 
     // WebGL1 Compat -- Start
+    // Disabled due to MRT support
+    if (false) {
 
-    if (type === 'fragment') {
+        if (type === 'fragment') {
+            code = code
+                .replace(/\bin\s/g, 'varying ') // For fragment shaders, replace "in " with "varying "
+                .replace('out highp vec4 fragColor;', '');
+        }
+
+        if (type === 'vertex') {
+            code = code
+                .replace(/\bin\s/g, 'attribute ') // For vertex shaders, replace "in " with "attribute "
+                .replace(/\bout\s/g, 'varying '); // For vertex shaders, replace "out " with "varying "
+        }
+
         code = code
-            .replace(/\bin\s/g, 'varying ') // For fragment shaders, replace "in " with "varying "
-            .replace('out highp vec4 fragColor;', '');
+            .replace(/fragColor/g, 'gl_FragColor')
+            .replace(/texture\(/g, 'texture2D(');
+
     }
-
-    if (type === 'vertex') {
-        code = code
-            .replace(/\bin\s/g, 'attribute ') // For vertex shaders, replace "in " with "attribute "
-            .replace(/\bout\s/g, 'varying '); // For vertex shaders, replace "out " with "varying "
-    }
-
-    code = code
-        .replace(/fragColor/g, 'gl_FragColor')
-        .replace(/texture\(/g, 'texture2D(');
-
     // WebGL1 Compat -- End
 
     code = code

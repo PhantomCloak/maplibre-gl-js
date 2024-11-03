@@ -107,11 +107,16 @@ export type CustomRenderMethodInput = {
     defaultProjectionData: ProjectionData;
 }
 
+type CustomRenderMethodPipelineInputs = {
+    RenderTexture: WebGLTexture;
+    PositionBuffer: WebGLTexture;
+};
+
 /**
  * @param gl - The map's gl context.
  * @param options - Argument object with render inputs like camera properties.
  */
-type CustomRenderMethod = (gl: WebGLRenderingContext|WebGL2RenderingContext, options: CustomRenderMethodInput) => void;
+type CustomRenderMethod = (gl: WebGLRenderingContext | WebGL2RenderingContext, matrix: mat4, options: CustomRenderMethodInput, inputs?: CustomRenderMethodPipelineInputs) => void;
 
 /**
  * Interface for custom style layers. This is a specification for
@@ -191,7 +196,7 @@ export interface CustomLayerInterface {
     /**
      * Either `"2d"` or `"3d"`. Defaults to `"2d"`.
      */
-    renderingMode?: '2d' | '3d';
+    renderingMode?: '2d' | '3d' | 'ppfx';
     /**
      * Called during a render frame allowing the layer to draw into the GL context.
      *
@@ -251,9 +256,10 @@ export function validateCustomStyleLayer(layerObject: CustomLayerInterface) {
 
     if (layerObject.renderingMode &&
         layerObject.renderingMode !== '2d' &&
-        layerObject.renderingMode !== '3d') {
+        layerObject.renderingMode !== '3d' &&
+        layerObject.renderingMode !== 'ppfx') {
         errors.push({
-            message: `layers.${id}: property "renderingMode" must be either "2d" or "3d"`
+            message: `layers.${id}: property "renderingMode" must be either "2d", "3d" or "ppfx"`
         });
     }
 
@@ -271,6 +277,10 @@ export class CustomStyleLayer extends StyleLayer {
 
     is3D() {
         return this.implementation.renderingMode === '3d';
+    }
+
+    isPpfx(): boolean {
+        return this.implementation.renderingMode === 'ppfx';
     }
 
     hasOffscreenPass() {

@@ -28,6 +28,7 @@ export interface IValue<T> {
 
 class BaseValue<T> implements IValue<T> {
     gl: WebGLRenderingContext|WebGL2RenderingContext;
+    glExtColor?: OES_draw_buffers_indexed;
     current: T;
     default: T;
     dirty: boolean;
@@ -37,6 +38,10 @@ class BaseValue<T> implements IValue<T> {
         this.default = this.getDefault();
         this.current = this.default;
         this.dirty = false;
+
+        if (this.gl instanceof WebGL2RenderingContext) {
+            this.glExtColor = this.gl.getExtension("OES_draw_buffers_indexed") as OES_draw_buffers_indexed;
+        }
     }
 
     get(): T {
@@ -95,10 +100,14 @@ export class ColorMask extends BaseValue<ColorMaskType> {
     getDefault(): ColorMaskType {
         return [true, true, true, true];
     }
-    set(v: ColorMaskType) {
+    set(v: ColorMaskType, target?: number) {
         const c = this.current;
         if (v[0] === c[0] && v[1] === c[1] && v[2] === c[2] && v[3] === c[3] && !this.dirty) return;
-        this.gl.colorMask(v[0], v[1], v[2], v[3]);
+        if (target && this.glExtColor)
+            this.glExtColor.colorMaskiOES(target, v[0], v[1], v[2], v[3]);
+        else
+            this.gl.colorMask(v[0], v[1], v[2], v[3]);
+
         this.current = v;
         this.dirty = false;
     }
@@ -494,13 +503,19 @@ export class ColorAttachment extends FramebufferAttachment<WebGLTexture> {
     setDirty() {
         this.dirty = true;
     }
-    set(v?: WebGLTexture | null): void {
+    set(v?: WebGLTexture | null, second?: boolean): void {
         if (v === this.current && !this.dirty) return;
         this.context.bindFramebuffer.set(this.parent);
         // note: it's possible to attach a renderbuffer to the color
         // attachment point, but thus far MBGL only uses textures for color
         const gl = this.gl;
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, v, 0);
+        if (!second) {
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, v, 0);
+        }
+        else {
+            if (!(gl instanceof WebGL2RenderingContext)) return;
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, v, 0);
+        }
 
         this.current = v;
         this.dirty = false;
